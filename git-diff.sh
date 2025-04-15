@@ -32,29 +32,93 @@ print_diff_summary() {
     echo "Target Commit: $target_commit" >> "$output_file"
     echo "" >> "$output_file"
 
-    diff_output=$(git diff --stat "$base_commit" "$target_commit")
-    echo "$diff_output" >> "$output_file"
+    # Get detailed file changes
+    echo "📂 File Changes Analysis" >> "$output_file"
+    echo "------------------------" >> "$output_file"
+    
+    # Get newly added files (excluding .Zone.Identifier files)
+    echo "🆕 Newly Added Files & Folders:" >> "$output_file"
+    temp_file=$(mktemp)
+    git diff --name-only --diff-filter=A "$base_commit" "$target_commit" | grep -v ':Zone.Identifier$' | while read -r file; do
+        # Get line count for the file
+        line_count=$(git show "$target_commit:$file" 2>/dev/null | wc -l || echo 0)
+        if [ -d "$file" ]; then
+            echo "  + $file (directory)" >> "$output_file"
+        else
+            # Check if file is a code file (not config)
+            if [[ ! "$file" =~ \.(json|yml|yaml|git|md|txt|log|lock|toml|ini|cfg|conf|config|properties)$ ]]; then
+                echo "$line_count" >> "$temp_file"
+            fi
+            echo "  + $file (${line_count} lines)" >> "$output_file"
+        fi
+    done
+    echo "" >> "$output_file"
+    
+    # Calculate total lines of code
+    total_code_lines=$(awk '{sum += $1} END {print sum}' "$temp_file" 2>/dev/null || echo 0)
+    rm -f "$temp_file"
+    echo "  Total new lines of code: $total_code_lines" >> "$output_file"
+    echo "" >> "$output_file"
 
-    files_changed=$(echo "$diff_output" | grep -o '[0-9]\+ files changed' | grep -o '[0-9]\+')
-    insertions=$(echo "$diff_output" | grep -o '[0-9]\+ insertions' | grep -o '[0-9]\+')
-    deletions=$(echo "$diff_output" | grep -o '[0-9]\+ deletions' | grep -o '[0-9]\+')
+    # Get deleted files
+    echo "🗑️ Deleted Files:" >> "$output_file"
+    git diff --name-only --diff-filter=D "$base_commit" "$target_commit" | while read -r file; do
+        echo "  - $file" >> "$output_file"
+    done
+    echo "" >> "$output_file"
 
-    files_changed=${files_changed:-0}
-    insertions=${insertions:-0}
-    deletions=${deletions:-0}
+    # Get renamed/moved files
+    echo "🔄 Renamed/Moved Files:" >> "$output_file"
+    git diff --name-status --diff-filter=R "$base_commit" "$target_commit" | while read -r status old_file new_file; do
+        echo "  ↪️ $old_file → $new_file" >> "$output_file"
+    done
+    echo "" >> "$output_file"
 
-    echo "Total Files Changed : $files_changed"
-    echo "Insertions (+)      : $insertions"
-    echo "Deletions (-)       : $deletions"
-    echo ""
+    # Get modified files with actual changes
+    echo "📝 Modified Files:" >> "$output_file"
+    git diff --name-only --diff-filter=M "$base_commit" "$target_commit" | grep -v ':Zone.Identifier$' | while read -r file; do
+        tmp_official=$(mktemp)
+        tmp_custom=$(mktemp)
+
+        # Official version
+        if git -C "$official_repo_path" cat-file -e "$base_commit:$file" 2>/dev/null; then
+            git -C "$official_repo_path" show "$base_commit:$file" > "$tmp_official"
+        else
+            touch "$tmp_official"
+        fi
+
+        # Custom version
+        if git -C "$custom_repo_path" cat-file -e "$target_commit:$file" 2>/dev/null; then
+            git -C "$custom_repo_path" show "$target_commit:$file" > "$tmp_custom"
+        else
+            touch "$tmp_custom"
+        fi
+
+        if [[ -s "$tmp_official" || -s "$tmp_custom" ]]; then
+            additions=$(diff -u "$tmp_official" "$tmp_custom" | grep -E '^\+[^+]' | wc -l | tr -d ' ')
+            deletions=$(diff -u "$tmp_official" "$tmp_custom" | grep -E '^\-[^-]' | wc -l | tr -d ' ')
+            
+            # Only show files with actual changes
+            if [ "$additions" -gt 0 ] || [ "$deletions" -gt 0 ]; then
+                echo "  * $file (${additions}+/${deletions}-)" >> "$output_file"
+            fi
+        fi
+
+        rm -f "$tmp_official" "$tmp_custom"
+    done
+    echo "" >> "$output_file"
+
     echo "📂 Files Affected are saved to: $output_file"
-    echo "--------------------------------------------"
 }
 
 # ---- Fork Detection Function ----
 check_fork_status() {
     echo "📥 Fetching branch '$official_branch' from official repo..."
     git fetch official-temp "$official_branch" --quiet || { echo "❌ Failed to fetch official branch."; exit 1; }
+
+    # Simple checkout of custom branch
+    echo "📥 Checking out branch '$custom_branch' in custom repo..."
+    git checkout "$custom_branch" --quiet || { echo "❌ Failed to checkout custom branch."; exit 1; }
 
     echo "🔍 Checking for common Git history..."
     merge_base=$(git merge-base "$custom_branch" "official-temp/$official_branch")
