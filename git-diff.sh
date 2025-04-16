@@ -69,13 +69,56 @@ print_diff_summary() {
 
     # Get renamed/moved files
     echo "🔄 Renamed/Moved Files:" >> "$output_file"
+    temp_counts=$(mktemp)
     git diff --name-status --diff-filter=R "$base_commit" "$target_commit" | while read -r status old_file new_file; do
-        echo "  ↪️ $old_file → $new_file" >> "$output_file"
+        tmp_official=$(mktemp)
+        tmp_custom=$(mktemp)
+
+        # Get content from old file in official repo
+        if git -C "$official_repo_path" cat-file -e "$base_commit:$old_file" 2>/dev/null; then
+            git -C "$official_repo_path" show "$base_commit:$old_file" > "$tmp_official"
+        else
+            touch "$tmp_official"
+        fi
+
+        # Get content from new file in custom repo
+        if git -C "$custom_repo_path" cat-file -e "$target_commit:$new_file" 2>/dev/null; then
+            git -C "$custom_repo_path" show "$target_commit:$new_file" > "$tmp_custom"
+        else
+            touch "$tmp_custom"
+        fi
+
+        if [[ -s "$tmp_official" || -s "$tmp_custom" ]]; then
+            additions=$(diff -u "$tmp_official" "$tmp_custom" | grep -E '^\+[^+]' | wc -l | tr -d ' ')
+            deletions=$(diff -u "$tmp_official" "$tmp_custom" | grep -E '^\-[^-]' | wc -l | tr -d ' ')
+            
+            # Only show files with actual changes
+            if [ "$additions" -gt 0 ] || [ "$deletions" -gt 0 ]; then
+                echo "  ↪️ $old_file → $new_file (${additions}+/${deletions}-)" >> "$output_file"
+                # Only add to total if it's a code file
+                if [[ ! "$new_file" =~ \.(json|yml|yaml|git|md|txt|log|lock|toml|ini|cfg|conf|config|properties)$ ]]; then
+                    echo "$additions $deletions" >> "$temp_counts"
+                fi
+            else
+                echo "  ↪️ $old_file → $new_file" >> "$output_file"
+            fi
+        fi
+
+        rm -f "$tmp_official" "$tmp_custom"
     done
+    echo "" >> "$output_file"
+    
+    # Calculate total changes from temp file
+    total_additions=$(awk '{sum += $1} END {print sum}' "$temp_counts" 2>/dev/null || echo 0)
+    total_deletions=$(awk '{sum += $2} END {print sum}' "$temp_counts" 2>/dev/null || echo 0)
+    rm -f "$temp_counts"
+    
+    echo "  Total code changes in renamed files: ${total_additions}+/${total_deletions}-" >> "$output_file"
     echo "" >> "$output_file"
 
     # Get modified files with actual changes
     echo "📝 Modified Files:" >> "$output_file"
+    temp_counts=$(mktemp)
     git diff --name-only --diff-filter=M "$base_commit" "$target_commit" | grep -v ':Zone.Identifier$' | while read -r file; do
         tmp_official=$(mktemp)
         tmp_custom=$(mktemp)
@@ -101,11 +144,23 @@ print_diff_summary() {
             # Only show files with actual changes
             if [ "$additions" -gt 0 ] || [ "$deletions" -gt 0 ]; then
                 echo "  * $file (${additions}+/${deletions}-)" >> "$output_file"
+                # Only add to total if it's a code file
+                if [[ ! "$file" =~ \.(json|yml|yaml|git|md|txt|log|lock|toml|ini|cfg|conf|config|properties)$ ]]; then
+                    echo "$additions $deletions" >> "$temp_counts"
+                fi
             fi
         fi
 
         rm -f "$tmp_official" "$tmp_custom"
     done
+    echo "" >> "$output_file"
+    
+    # Calculate total changes from temp file
+    total_additions=$(awk '{sum += $1} END {print sum}' "$temp_counts" 2>/dev/null || echo 0)
+    total_deletions=$(awk '{sum += $2} END {print sum}' "$temp_counts" 2>/dev/null || echo 0)
+    rm -f "$temp_counts"
+    
+    echo "  Total code changes in modified files: ${total_additions}+/${total_deletions}-" >> "$output_file"
     echo "" >> "$output_file"
 
     echo "📂 Files Affected are saved to: $output_file"
