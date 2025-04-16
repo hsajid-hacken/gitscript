@@ -18,6 +18,9 @@ A bash script to analyze and compare a forked or manually copied Git repository 
 - 🧹 Cleans up temporary checkouts
 
 ---
+## 🚀 User Manual Google drive link
+
+https://docs.google.com/document/d/19EFoPPGdo9VfNJkv_hk9xIrXX651Zi1tQstoIfekNx4/edit?tab=t.0
 
 ## 🚀 Getting Started
 
@@ -32,3 +35,4 @@ A bash script to analyze and compare a forked or manually copied Git repository 
 
 ```bash
 chmod +x git-diff.sh
+

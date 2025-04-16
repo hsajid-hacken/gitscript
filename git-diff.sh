@@ -46,7 +46,7 @@ print_diff_summary() {
             echo "  + $file (directory)" >> "$output_file"
         else
             # Check if file is a code file (not config)
-            if [[ ! "$file" =~ \.(json|yml|yaml|git|md|txt|log|lock|toml|ini|cfg|conf|config|properties)$ ]]; then
+            if [[ ! "$file" =~ \.(json|yml|yaml|git|md|txt|log|lock|toml|ini|cfg|conf|config|properties|abi)$ ]]; then
                 echo "$line_count" >> "$temp_file"
             fi
             echo "  + $file (${line_count} lines)" >> "$output_file"
@@ -96,7 +96,7 @@ print_diff_summary() {
             if [ "$additions" -gt 0 ] || [ "$deletions" -gt 0 ]; then
                 echo "  ↪️ $old_file → $new_file (${additions}+/${deletions}-)" >> "$output_file"
                 # Only add to total if it's a code file
-                if [[ ! "$new_file" =~ \.(json|yml|yaml|git|md|txt|log|lock|toml|ini|cfg|conf|config|properties)$ ]]; then
+                if [[ ! "$new_file" =~ \.(json|yml|yaml|git|md|txt|log|lock|toml|ini|cfg|conf|config|properties|abi)$ ]]; then
                     echo "$additions $deletions" >> "$temp_counts"
                 fi
             else
@@ -145,7 +145,7 @@ print_diff_summary() {
             if [ "$additions" -gt 0 ] || [ "$deletions" -gt 0 ]; then
                 echo "  * $file (${additions}+/${deletions}-)" >> "$output_file"
                 # Only add to total if it's a code file
-                if [[ ! "$file" =~ \.(json|yml|yaml|git|md|txt|log|lock|toml|ini|cfg|conf|config|properties)$ ]]; then
+                if [[ ! "$file" =~ \.(json|yml|yaml|git|md|txt|log|lock|toml|ini|cfg|conf|config|properties|abi)$ ]]; then
                     echo "$additions $deletions" >> "$temp_counts"
                 fi
             fi
