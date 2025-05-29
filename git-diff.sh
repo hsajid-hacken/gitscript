@@ -227,34 +227,43 @@ prompt_for_manual_or_auto() {
 
 # ---- Unknown Manual Copy Detection ----
 find_manual_copy_base() {
-    echo "🔍 Manual Copy Detected"
-    echo "------------------------------------------------------"
-
-    prompt_for_manual_or_auto
-
+    echo "🔍 Manual Copy Detection (using audit commit as reference)"
+    echo "----------------------------------------------------------"
+    # prompt_for_manual_or_auto
     echo ""
     echo "⏳ Enter timeframe for likely copy origin in official repo"
     echo "Format: YYYY-MM-DD (e.g. 2022-01-01)"
     read -p "Start date: " start_date
     read -p "End date  : " end_date
 
+    # Prepare clean checkout of audit commit from custom repo
+    tmp_custom_audit="/tmp/custom_audit_commit"
+    rm -rf "$tmp_custom_audit"
+    mkdir -p "$tmp_custom_audit"
     cd "$custom_repo_path"
-    oldest_commit=$(git rev-list --max-parents=0 "$custom_branch")
-    echo "📦 Oldest commit in custom repo: $oldest_commit"
-
-    tmp_custom="/tmp/custom_oldest_checkout"
-    rm -rf "$tmp_custom"
-    mkdir -p "$tmp_custom"
-    git --work-tree="$tmp_custom" checkout "$oldest_commit" --quiet . || {
-        echo "❌ Failed to checkout oldest commit of custom repo."
+    git --work-tree="$tmp_custom_audit" checkout "$audit_commit" --quiet . || {
+        echo "❌ Failed to checkout audit commit."
         exit 1
     }
 
-    cd "$official_repo_path"
+    cd "$official_repo_path" || { echo "❌ Cannot access official repo at $official_repo_path"; exit 1; }
+
+    # Try with origin/ prefix if branch doesn't exist
+    if ! git rev-parse --verify "$official_branch" >/dev/null 2>&1; then
+        if git rev-parse --verify "origin/$official_branch" >/dev/null 2>&1; then
+            official_branch="origin/$official_branch"
+            echo "✅ Found official branch as remote branch: $official_branch"
+        else
+            echo "❌ Branch '$official_branch' does not exist in official repo (tried both local and origin/$official_branch)"
+            exit 1
+        fi
+    fi
+
     commit_list=$(git rev-list --reverse --since="$start_date" --before="$end_date" "$official_branch")
 
     echo ""
-    echo "🔍 Scanning ${#commit_list[@]} commits from $start_date → $end_date for closest match..."
+    commit_count=$(echo "$commit_list" | wc -w)
+    echo "🔍 Scanning $commit_count commits from $start_date → $end_date for closest match..."
 
     best_match=""
     min_diff_count=-1
@@ -266,7 +275,7 @@ find_manual_copy_base() {
 
         git archive "$commit" | tar -x -C "$tmp_commit_dir"
 
-        diff_output=$(diff -r "$tmp_commit_dir" "$tmp_custom")
+        diff_output=$(diff -r "$tmp_commit_dir" "$tmp_custom_audit")
         diff_count=$(echo "$diff_output" | wc -l)
 
         echo "⏱ Commit $commit → $diff_count line differences"
@@ -281,13 +290,6 @@ find_manual_copy_base() {
             break
         fi
 
-        # Check if file structure is changed
-        file_structure_diff=$(diff -r --brief "$tmp_commit_dir" "$tmp_custom" | grep -v "Only in")
-        if [ -z "$file_structure_diff" ]; then
-            echo "📂 File structure is changed at commit: $commit"
-            break
-        fi
-
         rm -rf "$tmp_commit_dir"
     done
 
@@ -295,23 +297,11 @@ find_manual_copy_base() {
     echo "📌 Best matching commit from official repo: $best_match"
     echo "🔁 Difference lines: $min_diff_count"
 
-    # Prepare clean checkout of audit commit
-    tmp_custom_audit="/tmp/custom_audit_commit"
-    rm -rf "$tmp_custom_audit"
-    mkdir -p "$tmp_custom_audit"
-
-    cd "$custom_repo_path"
-    git --work-tree="$tmp_custom_audit" checkout "$audit_commit" --quiet . || {
-        echo "❌ Failed to checkout audit commit."
-        exit 1
-    }
-
     # Prepare clean checkout of best_match official commit
     tmp_commit_dir_best="/tmp/best_match_commit"
     rm -rf "$tmp_commit_dir_best"
     mkdir -p "$tmp_commit_dir_best"
 
-    cd "$official_repo_path"
     git archive "$best_match" | tar -x -C "$tmp_commit_dir_best"
 
     cd "$custom_repo_path"
@@ -321,7 +311,7 @@ find_manual_copy_base() {
     print_diff_summary "$best_match" "$audit_commit"
 
     git remote remove temp_origin >/dev/null 2>&1
-    rm -rf "$tmp_custom" "$tmp_commit_dir_best" "$tmp_custom_audit"
+    rm -rf "$tmp_commit_dir_best" "$tmp_custom_audit"
     cd "$official_repo_path" && git checkout "$official_branch" --quiet
     cd "$custom_repo_path" && git checkout "$custom_branch" --quiet
 }
