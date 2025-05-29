@@ -171,7 +171,7 @@ check_fork_status() {
     echo "📥 Fetching branch '$official_branch' from official repo..."
     git fetch official-temp "$official_branch" --quiet || { echo "❌ Failed to fetch official branch."; exit 1; }
 
-    # Simple checkout of custom branch
+   # Simple checkout of custom branch
     echo "📥 Checking out branch '$custom_branch' in custom repo..."
     git checkout "$custom_branch" --quiet || { echo "❌ Failed to checkout custom branch."; exit 1; }
 
@@ -331,6 +331,33 @@ diff_between_commits() {
     print_diff_summary "$merge_base" "$audit_commit"
 }
 
+known_fork_commit() {
+        read -p "Enter the known fork commit hash from the official repo: " known_fork_commit
+
+        tmp_official="/tmp/manual_compare_known_official"
+        tmp_custom="/tmp/manual_compare_custom"
+
+        rm -rf "$tmp_official" "$tmp_custom"
+        mkdir -p "$tmp_official" "$tmp_custom"
+
+        echo "📥 Checking out $known_fork_commit in official repo..."
+        cd "$official_repo_path"
+        git --work-tree="$tmp_official" checkout "$known_fork_commit" --quiet .
+
+        echo "📥 Checking out $audit_commit in custom repo..."
+        cd "$custom_repo_path"
+        git --work-tree="$tmp_custom" checkout "$audit_commit" --quiet .
+
+        print_diff_summary "$known_fork_commit" "$audit_commit"
+
+        # Cleanup
+        rm -rf "$tmp_official" "$tmp_custom"
+        cd "$custom_repo_path" && git checkout "$custom_branch" --quiet
+        cd "$official_repo_path" && git checkout "$official_branch" --quiet
+        git remote remove official-temp >/dev/null 2>&1
+        exit 0
+}
+
 # ==== MAIN ====
 
 cd "$custom_repo_path" || { echo "❌ Cannot access custom repo."; exit 1; }
@@ -340,11 +367,29 @@ if ! git remote | grep -q official-temp; then
     git remote add official-temp "$official_repo_path"
 fi
 
-# If shared history exists, follow fork diff logic
-if check_fork_status; then
-    diff_between_commits
+echo ""
+echo "🧠 How do you want to proceed with the fork commit detection?"
+echo "1) ✍️  I already know the correct fork commit hash."
+echo "2) 🔍 Please try to find the best matching fork commit for me."
+read -p "Choose [1 or 2]: " fork_mode
+
+if [ "$fork_mode" == "1" ]; then
+    known_fork_commit
 else
-    find_manual_copy_base
+    echo "👀 How do you want to find the fork point?"
+    echo "1) Use merge-base to detect the fork point from Git history (fast, but can be inaccurate if cherry-picks or rebases were used)."
+    echo "2) Scan a date range for the best matching commit based on code similarity."
+    echo ""
+    echo "⚠️  Note: If the repo history is affected by cherry-picks or rebases, merge-base may point to a much older commit than the real fork."
+    read -p "Choose [1 or 2]: " compare_mode
+    
+    if [ "$compare_mode" == "1" ]; then
+        if check_fork_status; then
+            diff_between_commits
+        fi
+    elif [ "$compare_mode" == "2" ]; then
+        find_manual_copy_base
+    fi
 fi
 
 git remote remove official-temp >/dev/null 2>&1
