@@ -324,6 +324,22 @@ diff_between_commits() {
 known_fork_commit() {
         read -p "Enter the known fork commit hash from the official repo: " known_fork_commit
 
+        echo "📥 Fetching branch '$official_branch' from official repo..."
+        # Try with origin/ prefix if branch doesn't exist
+        if ! git fetch official-temp "$official_branch" --quiet 2>/dev/null; then
+            if git fetch official-temp "origin/$official_branch" --quiet 2>/dev/null; then
+                official_branch="origin/$official_branch"
+                echo "✅ Found official branch as remote branch: $official_branch"
+            else
+                echo "❌ Failed to fetch official branch (tried both '$official_branch' and 'origin/$official_branch')"
+                exit 1
+            fi
+        fi
+
+        # Simple checkout of custom branch
+        echo "📥 Checking out branch '$custom_branch' in custom repo..."
+        git checkout "$custom_branch" --quiet || { echo "❌ Failed to checkout custom branch."; exit 1; }
+
         tmp_official="/tmp/manual_compare_known_official"
         tmp_custom="/tmp/manual_compare_custom"
 
